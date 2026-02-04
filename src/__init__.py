@@ -1,0 +1,3 @@
+"""XWatch - X/Twitter Tweet Monitor"""
+
+__version__ = "1.0.0"

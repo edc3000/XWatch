@@ -1,0 +1,32 @@
+services:
+  xwatch:
+    build: .
+    container_name: xwatch
+    restart: unless-stopped
+
+    # 环境变量配置
+    env_file:
+      - .env
+
+    # 挂载配置文件以支持热更新
+    volumes:
+      - ./.env:/app/.env:ro
+
+    # 端口映射
+    ports:
+      - "0.0.0.0:8090:8080"
+
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 网络配置
+    networks:
+      - xwatch-network
+
+networks:
+  xwatch-network:
+    driver: bridge
