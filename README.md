@@ -33,7 +33,7 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/your-username/XWatch.git
+git clone https://github.com/edc3000/XWatch.git
 cd XWatch
 
 # 2. 安装依赖
