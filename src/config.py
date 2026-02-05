@@ -37,8 +37,8 @@ class Config:
     min_user_interval: int = 60
     global_min_request_interval: float = 2.0
     rate_limit_backoff_max: int = 300
-    rsshub_enabled: bool = True
-    rsshub_base_url: str = "http://127.0.0.1:1200"
+    rsshub_enabled: bool = False
+    rsshub_base_url: str = ""
     rsshub_timeout: int = 15
 
     def is_valid(self) -> bool:
@@ -114,10 +114,8 @@ class ConfigManager:
                 rate_limit_backoff_max=int(
                     os.getenv("RATE_LIMIT_BACKOFF_MAX", "300")
                 ),
-                rsshub_enabled=os.getenv("RSSHUB_ENABLED", "true").lower() == "true",
-                rsshub_base_url=os.getenv(
-                    "RSSHUB_BASE_URL", "http://127.0.0.1:1200"
-                ).strip(),
+                rsshub_enabled=os.getenv("RSSHUB_ENABLED", "false").lower() == "true",
+                rsshub_base_url=os.getenv("RSSHUB_BASE_URL", "").strip(),
                 rsshub_timeout=int(os.getenv("RSSHUB_TIMEOUT", "15")),
             )
 

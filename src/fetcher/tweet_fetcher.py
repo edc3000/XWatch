@@ -264,7 +264,13 @@ class TweetFetcher:
                     tweet_data = content.get("tweet", {})
 
                     if tweet_data:
-                        tweet = self._extract_tweet_info(tweet_data)
+                        entry_id = str(entry.get("entryId", "")).lower()
+                        is_pinned = (
+                            "pinned" in entry_id
+                            or tweet_data.get("pinned")
+                            or tweet_data.get("is_pinned")
+                        )
+                        tweet = self._extract_tweet_info(tweet_data, is_pinned=is_pinned)
                         if tweet:
                             tweets.append(tweet)
             else:
@@ -276,7 +282,9 @@ class TweetFetcher:
 
         return tweets
 
-    def _extract_tweet_info(self, tweet_data: Dict) -> Optional[Dict]:
+    def _extract_tweet_info(
+        self, tweet_data: Dict, is_pinned: bool = False
+    ) -> Optional[Dict]:
         """从推文数据中提取关键信息"""
         try:
             tweet_id = tweet_data.get("id_str") or str(tweet_data.get("id", ""))
@@ -292,6 +300,7 @@ class TweetFetcher:
                 "retweet_count": tweet_data.get("retweet_count", 0),
                 "favorite_count": tweet_data.get("favorite_count", 0),
                 "media": self._extract_media(tweet_data),
+                "is_pinned": bool(is_pinned),
             }
         except Exception:
             return None
@@ -365,24 +374,35 @@ class TweetFetcher:
         if not tweets:
             return []
 
-        latest_id = tweets[0]["id"]
+        first_run = not self.last_seen_id and not self.seen_tweet_ids
+
+        # 标记置顶推文为已读，避免发送
+        for tweet in tweets:
+            if tweet.get("is_pinned"):
+                self.seen_tweet_ids.add(tweet["id"])
+
+        candidates = [t for t in tweets if not t.get("is_pinned")]
+        if not candidates:
+            return []
+
+        latest_id = candidates[0]["id"]
 
         # 首次运行（无任何记录）
-        if not self.last_seen_id and not self.seen_tweet_ids:
+        if first_run:
             for tweet in tweets:
                 self.seen_tweet_ids.add(tweet["id"])
             self.last_seen_id = latest_id
             self._persist_last_seen()
             logger.info(
-                f"[@{self.username}] 初始化/恢复状态：标记 {len(tweets)} 条历史推文为已读，仅推送最新一条"
+                f"[@{self.username}] 初始化/恢复状态：标记 {len(tweets)} 条历史推文为已读，仅推送最新一条（非置顶）"
             )
-            return [tweets[0]]
+            return [candidates[0]]
 
         # 优先使用持久化的 last_seen_id 判断增量
         if self.last_seen_id:
             new_tweets = [
                 tweet
-                for tweet in tweets
+                for tweet in candidates
                 if int(tweet["id"]) > int(self.last_seen_id)
             ]
             if new_tweets:
@@ -394,7 +414,7 @@ class TweetFetcher:
 
         # 兜底：使用 seen_tweet_ids 判断
         new_tweets = []
-        for tweet in tweets:
+        for tweet in candidates:
             if tweet["id"] not in self.seen_tweet_ids:
                 new_tweets.append(tweet)
                 self.seen_tweet_ids.add(tweet["id"])

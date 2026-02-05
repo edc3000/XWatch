@@ -47,21 +47,34 @@ cp .env.example .env
 python -m src.main
 ```
 
-### 方式二：Docker 部署（推荐，一键启动，含 RSSHub）
+### 方式二：Docker 部署（推荐）
 
 ```bash
 # 1. 配置环境变量
 cp .env.example .env
 # 编辑 .env 文件
 
-# 2. 一键启动（含 RSSHub）
+# 2. 启动容器
 docker-compose up -d --build
 
 # 3. 查看日志
 docker-compose logs -f
 ```
 
-> 提示：Docker 模式下 `RSSHUB_BASE_URL` 默认使用 `http://rsshub:1200`（服务名）。
+> 提示：如需 RSSHub 备用通道，使用 `--profile rsshub` 启动并在 `.env` 中设置 `RSSHUB_ENABLED=true`。
+
+如需同时启动 RSSHub：
+
+```bash
+docker-compose --profile rsshub up -d --build
+```
+
+并在 `.env` 中设置：
+
+```
+RSSHUB_ENABLED=true
+RSSHUB_BASE_URL=http://rsshub:1200
+```
 
 ## ⚙️ 配置说明
 
@@ -79,13 +92,13 @@ docker-compose logs -f
 | `MIN_USER_INTERVAL` | ❌ | `60` | 每个用户最小抓取间隔（秒） |
 | `GLOBAL_MIN_REQUEST_INTERVAL` | ❌ | `2.0` | 全局最小请求间隔（秒） |
 | `RATE_LIMIT_BACKOFF_MAX` | ❌ | `300` | 429 最大退避时间（秒） |
-| `RSSHUB_ENABLED` | ❌ | `true` | 启用 RSSHub 备用通道 |
-| `RSSHUB_BASE_URL` | ❌ | `http://127.0.0.1:1200` | RSSHub 基础地址（Docker 推荐 `http://rsshub:1200`） |
+| `RSSHUB_ENABLED` | ❌ | `false` | 启用 RSSHub 备用通道 |
+| `RSSHUB_BASE_URL` | ❌ | - | RSSHub 基础地址 |
 | `RSSHUB_TIMEOUT` | ❌ | `15` | RSSHub 请求超时（秒） |
 
-### 本地运行 + RSSHub
+### 本地运行 + RSSHub（可选）
 
-如果你本地运行（非 Docker），请确保 RSSHub 在本机启动，并将 `.env` 中的 `RSSHUB_BASE_URL` 改为：
+如果你本地运行（非 Docker），并希望启用 RSSHub，请确保 RSSHub 在本机启动，并将 `.env` 中的 `RSSHUB_BASE_URL` 改为：
 
 ```
 RSSHUB_BASE_URL=http://127.0.0.1:1200

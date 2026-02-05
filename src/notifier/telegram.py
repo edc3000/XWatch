@@ -6,6 +6,9 @@ Telegram Notifier Module
 import asyncio
 import logging
 from typing import Dict, Optional, List
+from email.utils import parsedate_to_datetime
+from datetime import timezone
+from zoneinfo import ZoneInfo
 
 from telegram import Bot, InputMediaPhoto
 from telegram.error import TelegramError
@@ -18,6 +21,7 @@ class TelegramNotifier:
     """Telegram 通知器"""
 
     CAPTION_LIMIT = 1024
+    BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
     def __init__(self, bot_token: str, chat_id: str):
         self.bot_token = bot_token
@@ -56,11 +60,23 @@ class TelegramNotifier:
 🔗 [查看原文]({tweet["url"]})
 """
         if tweet.get("created_at"):
+            formatted = self._format_created_at(tweet["created_at"])
             # 转义时间中的特殊字符（如 - 和 .）
-            created_at = self._escape_markdown(tweet["created_at"])
+            created_at = self._escape_markdown(formatted)
             message += f"\n⏰ {created_at}"
 
         return message
+
+    def _format_created_at(self, created_at: str) -> str:
+        """将推文时间格式化为北京时间（YYYY年MM月DD日HH时MM分）"""
+        try:
+            dt = parsedate_to_datetime(created_at)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.astimezone(self.BEIJING_TZ)
+            return dt.strftime("%Y年%m月%d日%H时%M分")
+        except Exception:
+            return created_at
 
     def _escape_markdown(self, text: str) -> str:
         """转义 MarkdownV2 特殊字符"""
