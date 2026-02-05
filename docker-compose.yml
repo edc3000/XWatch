@@ -26,6 +26,17 @@ services:
     # 网络配置
     networks:
       - xwatch-network
+    depends_on:
+      - rsshub
+
+  rsshub:
+    image: diygod/rsshub:latest
+    container_name: rsshub
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:1200:1200"
+    networks:
+      - xwatch-network
 
 networks:
   xwatch-network:

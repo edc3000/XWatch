@@ -64,7 +64,17 @@ class XTweetMonitor:
         # 添加新用户
         for user in new_users - current_users:
             logger.info(f"添加监控用户: @{user}")
-            self.fetchers[user] = TweetFetcher(user, self.state_store)
+            config = self.config_manager.config
+            self.fetchers[user] = TweetFetcher(
+                user,
+                self.state_store,
+                min_user_interval=config.min_user_interval,
+                global_min_request_interval=config.global_min_request_interval,
+                rate_limit_backoff_max=config.rate_limit_backoff_max,
+                rsshub_enabled=config.rsshub_enabled,
+                rsshub_base_url=config.rsshub_base_url,
+                rsshub_timeout=config.rsshub_timeout,
+            )
 
     def _signal_handler(self, signum, frame):
         """处理退出信号"""
@@ -84,6 +94,19 @@ class XTweetMonitor:
 
         # 更新 fetchers
         self._init_fetchers(config.twitter_usernames)
+
+        # 更新速率限制参数
+        for fetcher in self.fetchers.values():
+            fetcher.update_rate_limits(
+                min_user_interval=config.min_user_interval,
+                global_min_request_interval=config.global_min_request_interval,
+                rate_limit_backoff_max=config.rate_limit_backoff_max,
+            )
+            fetcher.update_rsshub_config(
+                enabled=config.rsshub_enabled,
+                base_url=config.rsshub_base_url,
+                timeout=config.rsshub_timeout,
+            )
 
         # 更新 notifier
         self.notifier.update_config(config.telegram_bot_token, config.telegram_chat_id)

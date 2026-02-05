@@ -17,7 +17,7 @@ if [ ! -f ".env" ]; then
 fi
 
 # 检查依赖
-if ! python -c "import requests, telegram, dotenv, watchdog" 2>/dev/null; then
+if ! python -c "import requests, telegram, dotenv, watchdog, feedparser" 2>/dev/null; then
     echo "📦 安装依赖..."
     pip install -r requirements.txt
 fi

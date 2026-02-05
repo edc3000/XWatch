@@ -34,6 +34,12 @@ class Config:
     send_existing_on_start: bool = False
     log_level: str = "INFO"
     state_file: str = "data/seen_tweets.json"
+    min_user_interval: int = 60
+    global_min_request_interval: float = 2.0
+    rate_limit_backoff_max: int = 300
+    rsshub_enabled: bool = True
+    rsshub_base_url: str = "http://127.0.0.1:1200"
+    rsshub_timeout: int = 15
 
     def is_valid(self) -> bool:
         """检查配置是否有效"""
@@ -101,6 +107,18 @@ class ConfigManager:
                 == "true",
                 log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
                 state_file=os.getenv("STATE_FILE", "data/seen_tweets.json"),
+                min_user_interval=int(os.getenv("MIN_USER_INTERVAL", "60")),
+                global_min_request_interval=float(
+                    os.getenv("GLOBAL_MIN_REQUEST_INTERVAL", "2.0")
+                ),
+                rate_limit_backoff_max=int(
+                    os.getenv("RATE_LIMIT_BACKOFF_MAX", "300")
+                ),
+                rsshub_enabled=os.getenv("RSSHUB_ENABLED", "true").lower() == "true",
+                rsshub_base_url=os.getenv(
+                    "RSSHUB_BASE_URL", "http://127.0.0.1:1200"
+                ).strip(),
+                rsshub_timeout=int(os.getenv("RSSHUB_TIMEOUT", "15")),
             )
 
         # 配置日志级别

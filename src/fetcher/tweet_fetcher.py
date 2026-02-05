@@ -6,9 +6,12 @@ Tweet Fetcher Module
 import re
 import json
 import logging
+import time
+from threading import Lock
 from typing import List, Dict, Optional
 
 import requests
+import feedparser
 
 from src.state import StateStore
 
@@ -22,13 +25,35 @@ class TweetFetcher:
     SYNDICATION_URL = (
         "https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
     )
+    _request_lock = Lock()
+    _last_request_time = 0.0
+    _global_backoff_until = 0.0
 
-    def __init__(self, username: str, state_store: Optional[StateStore] = None):
+    def __init__(
+        self,
+        username: str,
+        state_store: Optional[StateStore] = None,
+        min_user_interval: int = 60,
+        global_min_request_interval: float = 2.0,
+        rate_limit_backoff_max: int = 300,
+        rsshub_enabled: bool = False,
+        rsshub_base_url: str = "",
+        rsshub_timeout: int = 15,
+    ):
         self.username = username
         self.seen_tweet_ids: set = set()
         self.last_seen_id: Optional[str] = None
         self.session = requests.Session()
         self.state_store = state_store
+        self.min_user_interval = max(5, int(min_user_interval))
+        self.global_min_request_interval = max(0.0, float(global_min_request_interval))
+        self.rate_limit_backoff_max = max(30, int(rate_limit_backoff_max))
+        self.rsshub_enabled = bool(rsshub_enabled)
+        self.rsshub_base_url = rsshub_base_url.rstrip("/")
+        self.rsshub_timeout = max(5, int(rsshub_timeout))
+        self.last_fetch_at = 0.0
+        self.backoff_until = 0.0
+        self.consecutive_429 = 0
         self._rotate_user_agent()
         self._load_state()
 
@@ -65,6 +90,25 @@ class TweetFetcher:
         self.last_seen_id = None
         self._load_state()
 
+    def update_rate_limits(
+        self,
+        min_user_interval: int,
+        global_min_request_interval: float,
+        rate_limit_backoff_max: int,
+    ):
+        """更新速率限制参数"""
+        self.min_user_interval = max(5, int(min_user_interval))
+        self.global_min_request_interval = max(0.0, float(global_min_request_interval))
+        self.rate_limit_backoff_max = max(30, int(rate_limit_backoff_max))
+
+    def update_rsshub_config(
+        self, enabled: bool, base_url: str, timeout: int
+    ):
+        """更新 RSSHub 配置"""
+        self.rsshub_enabled = bool(enabled)
+        self.rsshub_base_url = base_url.rstrip("/")
+        self.rsshub_timeout = max(5, int(timeout))
+
     def _load_state(self):
         """加载持久化状态"""
         if not self.state_store:
@@ -80,36 +124,70 @@ class TweetFetcher:
         if self.state_store and self.last_seen_id:
             self.state_store.set_last_seen_id(self.username, self.last_seen_id)
 
+    def _wait_for_global_slot(self):
+        """全局请求节流，避免短时间内过多请求"""
+        if self.global_min_request_interval <= 0:
+            return
+        with TweetFetcher._request_lock:
+            now = time.time()
+            elapsed = now - TweetFetcher._last_request_time
+            if elapsed < self.global_min_request_interval:
+                time.sleep(self.global_min_request_interval - elapsed)
+            TweetFetcher._last_request_time = time.time()
+
     def fetch_tweets(self) -> List[Dict]:
         """获取用户推文列表（带重试机制）"""
-        import time
         import random
 
         max_retries = 3
-        base_delay = 5  # 基础等待时间（秒）
+        base_delay = 15  # 429 基础等待时间（秒）
+
+        now = time.time()
+        if (
+            TweetFetcher._global_backoff_until
+            and now < TweetFetcher._global_backoff_until
+        ):
+            return self._fetch_tweets_rsshub()
+
+        if self.backoff_until and now < self.backoff_until:
+            logger.warning(
+                f"[@{self.username}] 处于限流冷却期，跳过请求（剩余 {self.backoff_until - now:.1f}s）"
+            )
+            return self._fetch_tweets_rsshub()
+
+        if self.last_fetch_at and now - self.last_fetch_at < self.min_user_interval:
+            return []
 
         for attempt in range(max_retries):
             try:
                 # 每次请求前随机等待 1-3 秒，避免过于规律
                 time.sleep(random.uniform(1, 3))
+                self._wait_for_global_slot()
 
                 url = self.SYNDICATION_URL.format(username=self.username)
                 response = self.session.get(url, timeout=30)
 
                 if response.status_code == 429:
-                    # 触发限流，进行指数退避
-                    wait_time = base_delay * (2**attempt) + random.uniform(0, 5)
+                    # 触发限流，设置冷却时间并停止本次请求
+                    self.consecutive_429 += 1
+                    wait_time = base_delay * (2 ** (self.consecutive_429 - 1)) + random.uniform(0, 5)
+                    wait_time = min(wait_time, self.rate_limit_backoff_max)
+                    self.backoff_until = time.time() + wait_time
+                    TweetFetcher._global_backoff_until = self.backoff_until
+                    self.last_fetch_at = time.time()
                     logger.warning(
-                        f"[@{self.username}] 触发 429 限流，等待 {wait_time:.1f} 秒后重试..."
+                        f"[@{self.username}] 触发 429 限流，进入冷却 {wait_time:.1f} 秒"
                     )
-                    time.sleep(wait_time)
                     self._rotate_user_agent()  # 切换 UA
-                    continue
+                    return self._fetch_tweets_rsshub()
 
                 response.raise_for_status()
 
                 tweets = self._parse_tweets(response.text)
                 logger.debug(f"获取到 {len(tweets)} 条推文")
+                self.last_fetch_at = time.time()
+                self.consecutive_429 = 0
+                self.backoff_until = 0.0
                 return tweets
 
             except requests.RequestException as e:
@@ -119,7 +197,50 @@ class TweetFetcher:
                 if attempt < max_retries - 1:
                     time.sleep(2)
 
-        return []
+        return self._fetch_tweets_rsshub()
+
+    def _fetch_tweets_rsshub(self) -> List[Dict]:
+        """使用 RSSHub 获取用户推文（备用通道）"""
+        if not self.rsshub_enabled or not self.rsshub_base_url:
+            return []
+
+        try:
+            url = f"{self.rsshub_base_url}/twitter/user/{self.username}"
+            response = self.session.get(url, timeout=self.rsshub_timeout)
+            response.raise_for_status()
+
+            feed = feedparser.parse(response.text)
+            entries = feed.entries or []
+            tweets: List[Dict] = []
+
+            for entry in entries:
+                link = entry.get("link") or ""
+                match = re.search(r"/status/(\d+)", link)
+                if not match:
+                    continue
+                tweet_id = match.group(1)
+                text = entry.get("title") or entry.get("summary") or ""
+                text = re.sub(r"<[^>]+>", "", text).strip()
+
+                tweets.append(
+                    {
+                        "id": tweet_id,
+                        "text": text,
+                        "created_at": entry.get("published", ""),
+                        "user": self.username,
+                        "url": link or f"https://twitter.com/{self.username}/status/{tweet_id}",
+                        "retweet_count": 0,
+                        "favorite_count": 0,
+                        "media": [],
+                    }
+                )
+
+            if tweets:
+                self.last_fetch_at = time.time()
+            return tweets
+        except Exception as e:
+            logger.debug(f"[@{self.username}] RSSHub 备用通道失败: {e}")
+            return []
 
     def _parse_tweets(self, html: str) -> List[Dict]:
         """从 HTML 中解析推文数据"""
